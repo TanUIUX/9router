@@ -4,6 +4,18 @@ import { ensureDirs, DATA_FILE } from "./paths.js";
 if (!global._dbAdapter) global._dbAdapter = { instance: null, initPromise: null, logged: false };
 const state = global._dbAdapter;
 
+async function tryTurso() {
+  // Opt-in only: without TURSO_DATABASE_URL nothing changes for local/Docker runs.
+  if (!process.env.TURSO_DATABASE_URL) return null;
+  try {
+    const { createTursoAdapter } = await import("./adapters/tursoAdapter.js");
+    return await createTursoAdapter(DATA_FILE);
+  } catch (e) {
+    console.warn(`[DB] Turso unavailable: ${e.message}`);
+    return null;
+  }
+}
+
 async function tryBunSqlite() {
   // Bun runtime only — built-in, no install needed
   if (!process.versions.bun) return null;
@@ -55,13 +67,15 @@ async function trySqlJs() {
 async function initAdapter() {
   ensureDirs();
   // Order per runtime:
-  //   Bun:  bun:sqlite → sql.js
-  //   Node: better-sqlite3 → node:sqlite (≥22.5) → sql.js
-  let adapter = await tryBunSqlite();
+  //   Turso: always first, but only when TURSO_DATABASE_URL is set (serverless)
+  //   Bun:   bun:sqlite → sql.js
+  //   Node:  better-sqlite3 → node:sqlite (≥22.5) → sql.js
+  let adapter = await tryTurso();
+  if (!adapter) adapter = await tryBunSqlite();
   if (!adapter) adapter = await tryBetterSqlite();
   if (!adapter) adapter = await tryNodeSqlite();
   if (!adapter) adapter = await trySqlJs();
-  if (!adapter) throw new Error("[DB] No SQLite driver available (bun/better/node/sql.js all failed)");
+  if (!adapter) throw new Error("[DB] No SQLite driver available (turso/bun/better/node/sql.js all failed)");
 
   if (!state.logged) {
     console.log(`[DB] Driver: ${adapter.driver} | file: ${DATA_FILE}`);
