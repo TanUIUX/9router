@@ -47,12 +47,15 @@ export async function createTursoAdapter(filePath) {
     }
   }
 
-  // Embedded replicas and remote connections reject some local-only pragmas
-  // (WAL in particular). Failing here must not take the app down.
-  try {
-    db.exec(PRAGMA_SQL);
-  } catch (e) {
-    console.warn(`[DB] Turso: pragma skipped (${e.message})`);
+  // PRAGMA_SQL starts with `journal_mode = WAL`, which an embedded replica or a
+  // remote connection can reject. Apply each pragma on its own so one rejection
+  // does not skip the rest — `foreign_keys = ON` and `busy_timeout` still matter.
+  for (const pragma of PRAGMA_SQL.split(";").map((s) => s.trim()).filter(Boolean)) {
+    try {
+      db.exec(`${pragma};`);
+    } catch (e) {
+      console.warn(`[DB] Turso: pragma skipped (${pragma}) — ${e.message}`);
+    }
   }
 
   const stmtCache = new Map();
